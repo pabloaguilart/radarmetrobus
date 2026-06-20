@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Radar Metrobús CDMX - Live</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    :root {
+      --mb-red: #9b1c31;
+      --dark: #0f172a;
+      --muted: #94a3b8;
+      --card: rgba(15,23,42,.86);
+      --line: rgba(148,163,184,.22);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: #020617;
+    }
+
+    body.light {
+      background: #eef2f7;
+    }
+
+    #map {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* --- MARCADORES DE CAMIONES --- */
+    .custom-div-icon {
+      background: transparent;
+      border: none;
+    }
+
+    .bus-marker-container {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* El círculo de color principal que envuelve al camión */
+    .bus-marker-circle {
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.92);
+      box-shadow: 0 0 0 3px rgba(15,23,42,.45), 0 8px 18px rgba(0,0,0,0.36);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+    }
+
+    /* El SVG del camioncito */
+    .bus-svg {
+      width: 60%;
+      height: 60%;
+      fill: currentColor;
+    }
+
+    /* La flecha direccional */
+    .bus-marker-direction {
+      position: absolute;
+      border-radius: 50%;
+      z-index: 1;
+      transition: transform 0.2s linear;
+    }
+
+    .bus-marker-arrow {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0; 
+      height: 0; 
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      filter: drop-shadow(0 -1px 2px rgba(0,0,0,0.3));
+    }
+
+    /* El puntito para cuando alejas el zoom */
+    .mb-dot {
+      border-radius: 50%;
+      border: 1.5px solid rgba(255,255,255,.88);
+      box-shadow: 0 0 0 4px rgba(255,255,255,.08), 0 2px 8px rgba(0,0,0,0.5);
+      transition: width 0.2s, height 0.2s;
+    }
+
+    .vehicle-dim {
+      opacity: .22;
+      filter: grayscale(.8);
+    }
+
+    .vehicle-selected .bus-marker-circle,
+    .vehicle-selected.mb-dot {
+      box-shadow: 0 0 0 4px rgba(255,255,255,.45), 0 0 0 10px rgba(177,251,9,.18), 0 10px 24px rgba(0,0,0,.45);
+      transform: scale(1.16);
+    }
+
+    /* --- ESTACIONES --- */
+    .station-marker-container {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+
+    .station-dot {
+      width: var(--station-size, 8px);
+      height: var(--station-size, 8px);
+      background: rgba(255,255,255,.96);
+      border: 2px solid rgba(15,23,42,.92);
+      border-radius: 50%;
+      box-shadow: 0 0 0 2px rgba(177,251,9,.22), 0 2px 8px rgba(0,0,0,0.35);
+      flex-shrink: 0;
+    }
+
+    .station-label {
+      background: rgba(15,23,42,0.92);
+      padding: 3px 7px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 800;
+      color: #f8fafc;
+      border: 1px solid rgba(255,255,255,.2);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.34);
+      text-shadow: none;
+    }
+
+    /* --- INTERFAZ / PANELES --- */
+    .top-panel {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      z-index: 999;
+      background: var(--card);
+      padding: 14px;
+      border-radius: 16px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.34);
+      width: min(380px, calc(100vw - 28px));
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.12);
+    }
+
+    body.light .top-panel,
+    body.light .bottom-sheet,
+    body.light .zoom-chip {
+      background: rgba(255,255,255,.92);
+      color: #0f172a;
+      border-color: rgba(15,23,42,.12);
+      box-shadow: 0 18px 50px rgba(15,23,42,.18);
+    }
+
+    .brand-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; color: #f8fafc; font-size: 17px; }
+    body.light .brand,
+    body.light .sheet-title,
+    body.light .route-name,
+    body.light .info-value,
+    body.light .eta-value,
+    body.light .stat-num {
+      color: #0f172a;
+    }
+    .brand-badge {
+      width: 34px; height: 34px; border-radius: 8px; background: var(--mb-red);
+      color: white; display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 14px;
+    }
+
+    .panel-actions { display: flex; align-items: center; gap: 8px; }
+    .icon-btn {
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.08);
+      color: #f8fafc;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .icon-btn svg,
+    .nav-btn svg,
+    .sheet-bus svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+    }
+    body.light .icon-btn {
+      border-color: rgba(15,23,42,.14);
+      background: rgba(15,23,42,.06);
+      color: #0f172a;
+    }
+
+    .live-pill {
+      display: flex; align-items: center; gap: 6px; font-size: 11px; color: #065f46;
+      background: #d1fae5; padding: 4px 8px; border-radius: 999px; font-weight: bold;
+    }
+    .live-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: #10b981; animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse { 0% { opacity: .4; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.2); } 100% { opacity: .4; transform: scale(.8); } }
+
+    .status { margin-top: 8px; font-size: 12px; color: var(--muted); }
+    
+    .stats { margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .stat { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 8px; text-align: center; }
+    .stat-num { font-weight: 900; font-size: 18px; color: #f8fafc; }
+    .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-top: 2px; }
+    body.light .stat,
+    body.light .ctrl-btn,
+    body.light .eta-card {
+      background: rgba(15,23,42,.055);
+      border-color: rgba(15,23,42,.12);
+    }
+
+    .line-filters { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .search-input {
+      width: 100%;
+      margin-top: 12px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.08);
+      color: #f8fafc;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+    }
+    .search-input::placeholder { color: #94a3b8; }
+    body.light .search-input {
+      border-color: rgba(15,23,42,.14);
+      background: rgba(15,23,42,.055);
+      color: #0f172a;
+    }
+    .line-btn {
+      border: 0; color: white; border-radius: 6px; padding: 6px 12px; font-weight: bold; font-size: 12px;
+      cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: opacity 0.2s;
+    }
+    .line-btn.off { opacity: 0.3; filter: grayscale(1); }
+
+    .controls { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .ctrl-btn {
+      border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.08); padding: 6px 10px; border-radius: 6px;
+      cursor: pointer; font-size: 12px; font-weight: bold; color: #e2e8f0;
+    }
+    .ctrl-btn:hover, .ctrl-btn.active { background: rgba(255,255,255,.18); color: white; }
+
+    /* --- BOTTOM SHEET --- */
+    .bottom-sheet {
+      position: absolute; left: 14px; right: 14px; bottom: 14px; z-index: 999;
+      width: auto; max-width: 920px; margin: 0 auto; background: rgba(15,23,42,.96);
+      border-radius: 16px; box-shadow: 0 22px 70px rgba(0,0,0,.45);
+      border: 1px solid rgba(255,255,255,.12);
+      overflow: hidden; display: none;
+      color: #f8fafc;
+    }
+    .sheet-head {
+      padding: 12px 14px; display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 1px solid rgba(255,255,255,.1);
+    }
+    .sheet-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .sheet-bus {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      flex: 0 0 auto;
+      box-shadow: 0 8px 18px rgba(0,0,0,.28);
+    }
+    .sheet-copy { min-width: 0; }
+    .sheet-title { font-weight: 900; font-size: 18px; color: #f8fafc; }
+    .sheet-sub { margin-top: 4px; color: var(--muted); font-size: 13px; }
+    .close-btn {
+      border: 0; background: rgba(255,255,255,.1); color: white; width: 28px; height: 28px; border-radius: 50%;
+      cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
+    }
+    .sheet-body { padding: 12px 14px; }
+    .line-tag {
+      display: inline-flex; align-items: center; color: white; padding: 4px 10px;
+      border-radius: 4px; font-weight: bold; font-size: 12px; margin-bottom: 12px;
+    }
+    .route-name { font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 12px; }
+    
+    .sheet-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .info-box { border-bottom: 1px solid rgba(255,255,255,.1); padding-bottom: 8px;}
+    .info-label { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+    .info-value { margin-top: 2px; color: #f8fafc; font-size: 14px; font-weight: bold; }
+    .eta-card {
+      margin-top: 12px; padding: 12px; border-radius: 12px;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.1);
+    }
+    .eta-title { color: #cbd5e1; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .03em; }
+    .eta-value { margin-top: 4px; color: #f8fafc; font-size: 16px; font-weight: 900; }
+    .eta-note { margin-top: 4px; color: var(--muted); font-size: 12px; }
+
+    .sheet-route {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .nav-rail {
+      position: absolute;
+      right: 14px;
+      top: 96px;
+      z-index: 998;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .nav-btn {
+      width: 42px;
+      height: 42px;
+      border-radius: 13px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(15,23,42,.86);
+      color: #f8fafc;
+      box-shadow: 0 12px 30px rgba(0,0,0,.32);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+    }
+
+    body.light .nav-btn {
+      background: rgba(255,255,255,.9);
+      color: #0f172a;
+      border-color: rgba(15,23,42,.12);
+    }
+
+    .user-location-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #2f8cff;
+      border: 3px solid white;
+      box-shadow: 0 0 0 8px rgba(47,140,255,.22), 0 8px 18px rgba(0,0,0,.28);
+    }
+
+    .zoom-chip {
+      position: absolute; right: 14px; top: 14px; z-index: 998;
+      background: rgba(15,23,42,.84); padding: 6px 10px; border-radius: 8px;
+      box-shadow: 0 12px 30px rgba(0,0,0,.32); font-size: 11px; font-weight: bold; color: #cbd5e1;
+      border: 1px solid rgba(255,255,255,.12);
+    }
+
+    @media (max-width: 640px) {
+      .top-panel {
+        top: 10px;
+        left: 10px;
+        width: calc(100vw - 20px);
+        padding: 10px;
+        border-radius: 14px;
+      }
+      .brand { font-size: 15px; }
+      .brand-badge { width: 30px; height: 30px; border-radius: 8px; font-size: 12px; }
+      .live-pill { padding: 3px 7px; font-size: 10px; }
+      .top-panel.collapsed .panel-content { display: none; }
+      .top-panel:not(.collapsed) .panel-content { display: block; }
+      .stats { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+      .stat { padding: 7px 4px; }
+      .stat-num { font-size: 17px; }
+      .line-filters { max-height: 88px; overflow-y: auto; }
+      .line-btn { padding: 6px 9px; font-size: 11px; }
+      .bottom-sheet {
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        width: calc(100vw - 16px);
+        max-height: 30vh;
+        border-radius: 16px;
+        overflow-y: auto;
+      }
+      .sheet-head { padding: 10px 12px; }
+      .sheet-body { padding: 12px; }
+      .sheet-title { font-size: 16px; }
+      .sheet-sub { font-size: 12px; }
+      .route-name { font-size: 13px; margin-bottom: 10px; }
+      .sheet-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      .sheet-route { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .info-value { font-size: 13px; }
+      .eta-card { padding: 10px; margin-top: 8px; }
+      .eta-value { font-size: 14px; }
+      .zoom-chip { display: none; }
+      .nav-rail { right: 10px; top: 104px; }
+      .nav-btn { width: 40px; height: 40px; }
+    }
+
+    @media (min-width: 641px) {
+      .top-panel.collapsed .panel-content { display: block; }
+      #panelToggle { display: none; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="top-panel collapsed" id="topPanel">
+    <div class="brand-row">
+      <div class="brand">
+        <div class="brand-badge">MB</div>
+        <div>Radar Metrobús CDMX</div>
+      </div>
+      <div class="panel-actions">
+        <div class="live-pill">
+          <span class="live-dot"></span> en vivo
+        </div>
+        <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="Cambiar tema"></button>
+        <button class="icon-btn" id="panelToggle" onclick="togglePanel()" title="Abrir filtros"></button>
+      </div>
+    </div>
+
+    <div class="panel-content">
+    <div class="status" id="status">Cargando unidades...</div>
+    <div class="status" id="extraStatus">Cargando líneas...</div>
+
+      <div class="stats">
+        <div class="stat"><div class="stat-num" id="statVehicles">0</div><div class="stat-label">unidades</div></div>
+        <div class="stat"><div class="stat-num" id="statLines">0</div><div class="stat-label">líneas activas</div></div>
+        <div class="stat"><div class="stat-num" id="statStops">0</div><div class="stat-label">estaciones</div></div>
+      </div>
+
+      <input class="search-input" id="unitSearch" type="search" inputmode="numeric" placeholder="Buscar unidad, ej. 2305" onkeydown="handleSearchKey(event)" />
+
+      <div class="line-filters" id="lineFilters"></div>
+
+    <div class="controls">
+      <button class="ctrl-btn active" id="stopsBtn" onclick="toggleStops()">Estaciones</button>
+      <button class="ctrl-btn active" id="vehiclesBtn" onclick="toggleVehicles()">Unidades</button>
+      <button class="ctrl-btn" onclick="fitToVehicles()">Ver todas</button>
+    </div>
+    </div>
+  </div>
+
+  <div class="zoom-chip" id="zoomChip">Zoom 12</div>
+
+  <div id="map"></div>
+
+  <div class="nav-rail">
+    <button class="nav-btn" onclick="map.zoomIn()" title="Acercar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <button class="nav-btn" onclick="map.zoomOut()" title="Alejar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14"/></svg>
+    </button>
+    <button class="nav-btn" onclick="locateUser()" title="Mi ubicación">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>
+    </button>
+    <button class="nav-btn" onclick="fitToVehicles()" title="Ver unidades">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M9 12h6"/></svg>
+    </button>
+  </div>
+
+  <div class="bottom-sheet" id="bottomSheet">
+    <div class="sheet-head">
+      <div class="sheet-main">
+        <div class="sheet-bus" id="sheetBusIcon"></div>
+        <div class="sheet-copy">
+          <div class="sheet-title" id="sheetTitle">Unidad</div>
+          <div class="sheet-sub" id="sheetSub">Detalle del vehículo</div>
+        </div>
+      </div>
+      <button class="close-btn" onclick="closeSheet()">✕</button>
+    </div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // Inicialización del mapa
+    const map = L.map('map', { preferCanvas: true, zoomControl: false }).setView([19.4326, -99.1332], 12);
+
+    let currentTheme = 'dark';
+    const tileUrls = {
+      dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+    };
+    let baseLayer = L.tileLayer(tileUrls.dark, {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap &copy; CARTO'
+    }).addTo(map);
+
+    // Variables globales
+    let markers = {};
+    let vehicleData = {};
+    let allStops = [];
+    let lastFeedUpdated = '';
+    let selectedVehicleId = null;
+    let followSelected = true;
+    let userLocationMarker = null;
+    let activeLines = new Set();
+    let linesMap = {};
+
+    let shapesLayer = L.layerGroup().addTo(map);
+    let stopsLayer = L.layerGroup().addTo(map);
+    // Vuelve a ser una capa normal y limpia, adiós MarkerCluster
+    let vehiclesLayer = L.layerGroup().addTo(map);
+
+    let stopsVisible = true;
+    let vehiclesVisible = true;
+    const REFRESH_SECONDS = 10;
+    const ANIMATION_MS = 9000;
+
+    const icons = {
+      sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>',
+      moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 14.5A8.4 8.4 0 0 1 9.5 3.2 8.5 8.5 0 1 0 20.8 14.5z"/></svg>',
+      menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h14"/></svg>',
+      close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+      bus: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 3h12c1.7 0 3 1.3 3 3v10.5c0 1.1-.6 2.1-1.5 2.6V21c0 .6-.4 1-1 1h-1c-.6 0-1-.4-1-1v-1h-9v1c0 .6-.4 1-1 1h-1c-.6 0-1-.4-1-1v-1.9A3 3 0 0 1 3 16.5V6c0-1.7 1.3-3 3-3Zm.5 3A1.5 1.5 0 0 0 5 7.5V11h14V7.5A1.5 1.5 0 0 0 17.5 6h-11ZM7 17.5A1.5 1.5 0 1 0 7 14a1.5 1.5 0 0 0 0 3.5Zm10 0A1.5 1.5 0 1 0 17 14a1.5 1.5 0 0 0 0 3.5Z"/></svg>'
+    };
+
+    // --- FUNCIONES DE UTILIDAD ---
+    function safeBearing(bearing) {
+      if (bearing === null || bearing === undefined || isNaN(bearing)) return 0;
+      return ((Number(bearing) % 360) + 360) % 360;
+    }
+
+    function estimateBearing(fromLatLng, toLatLng) {
+      const lat1 = fromLatLng.lat * Math.PI / 180;
+      const lat2 = toLatLng.lat * Math.PI / 180;
+      const deltaLng = (toLatLng.lng - fromLatLng.lng) * Math.PI / 180;
+
+      const y = Math.sin(deltaLng) * Math.cos(lat2);
+      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
+
+      let bearing = Math.atan2(y, x) * 180 / Math.PI;
+      return (bearing + 360) % 360;
+    }
+
+    function formatSpeed(speed) {
+      return speed ? `${Math.round(speed * 3.6)} km/h` : 'N/D';
+    }
+
+    function isMobileViewport() {
+      return window.matchMedia('(max-width: 640px)').matches;
+    }
+
+    function togglePanel() {
+      const panel = document.getElementById('topPanel');
+      const toggle = document.getElementById('panelToggle');
+      panel.classList.toggle('collapsed');
+      toggle.innerHTML = panel.classList.contains('collapsed') ? icons.menu : icons.close;
+    }
+
+    function toggleTheme() {
+      currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      document.body.classList.toggle('light', currentTheme === 'light');
+      map.removeLayer(baseLayer);
+      baseLayer = L.tileLayer(tileUrls[currentTheme], {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap &copy; CARTO'
+      }).addTo(map);
+      document.getElementById('themeBtn').innerHTML = currentTheme === 'dark' ? icons.sun : icons.moon;
+    }
+
+    function initChromeIcons() {
+      document.getElementById('themeBtn').innerHTML = icons.sun;
+      document.getElementById('panelToggle').innerHTML = icons.menu;
+    }
+
+    function panToTrackedMarker(marker) {
+      if (!marker) return;
+      map.panTo(marker.getLatLng(), { animate: true, duration: 0.45 });
+      if (isMobileViewport()) {
+        setTimeout(() => map.panBy([0, 90], { animate: true, duration: 0.25 }), 120);
+      }
+    }
+
+    function locateUser() {
+      if (!navigator.geolocation) return;
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const latlng = [pos.coords.latitude, pos.coords.longitude];
+        const icon = L.divIcon({
+          className: 'custom-div-icon',
+          html: '<div class="user-location-dot"></div>',
+          iconSize: [18, 18],
+          iconAnchor: [9, 9]
+        });
+        if (!userLocationMarker) {
+          userLocationMarker = L.marker(latlng, { icon, interactive: false }).addTo(map);
+        } else {
+          userLocationMarker.setLatLng(latlng);
+        }
+        map.setView(latlng, Math.max(map.getZoom(), 15), { animate: true });
+      }, () => {}, { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
+    }
+
+    function handleSearchKey(event) {
+      if (event.key !== 'Enter') return;
+      const term = event.currentTarget.value.trim().toLowerCase();
+      if (!term) return;
+
+      const matchId = Object.keys(vehicleData).find(id => {
+        const v = vehicleData[id];
+        return String(v.label || '').toLowerCase() === term ||
+          String(v.vehicle_id || '').toLowerCase() === term ||
+          String(id || '').toLowerCase() === term;
+      });
+
+      if (matchId) {
+        selectVehicle(matchId, true);
+        map.setZoom(Math.max(map.getZoom(), 15));
+        if (isMobileViewport()) {
+          document.getElementById('topPanel').classList.add('collapsed');
+          document.getElementById('panelToggle').innerText = '☰';
+        }
+      }
+    }
+
+    function bearingDiff(a, b) {
+      const diff = Math.abs(a - b) % 360;
+      return diff > 180 ? 360 - diff : diff;
+    }
+
+    function stopProgressEstimate(v) {
+      if (!allStops.length || !v.lat || !v.lon) return null;
+
+      const current = L.latLng(v.lat, v.lon);
+      const vehicleBearing = safeBearing(v.bearing);
+      let nearest = null;
+      let next = null;
+
+      allStops.forEach(stop => {
+        const stopLatLng = L.latLng(stop.lat, stop.lon);
+        const distance = current.distanceTo(stopLatLng);
+        if (distance > 1400) return;
+
+        const towardStop = estimateBearing(current, stopLatLng);
+        const directionPenalty = vehicleBearing ? bearingDiff(vehicleBearing, towardStop) : 0;
+        const nearestScore = distance + Math.min(directionPenalty, 90) * 2;
+        const nextScore = distance + directionPenalty * 4;
+
+        if (!nearest || nearestScore < nearest.score) {
+          nearest = { ...stop, distance, directionPenalty, score: nearestScore };
+        }
+
+        if (distance > 55 && directionPenalty < 85 && (!next || nextScore < next.score)) {
+          next = { ...stop, distance, directionPenalty, score: nextScore };
+        }
+      });
+
+      if (!nearest && !next) return null;
+      const speedMps = Number(v.speed) > 1 ? Number(v.speed) : 6;
+      if (nearest) nearest.etaMin = Math.max(1, Math.round(nearest.distance / speedMps / 60));
+      if (next) next.etaMin = Math.max(1, Math.round(next.distance / speedMps / 60));
+      return { nearest, next };
+    }
+
+    // --- DISEÑO DE MARCADORES (CAMIONES Y PUNTITOS) ---
+    function busIcon(v, id) {
+      const color = '#' + (v.color || '9B1C31');
+      const textColor = '#' + (v.text_color || 'FFFFFF');
+      const bearing = safeBearing(v.bearing);
+      const zoom = map.getZoom();
+      const selectedClass = selectedVehicleId === id ? 'vehicle-selected' : '';
+      const dimClass = selectedVehicleId && selectedVehicleId !== id ? 'vehicle-dim' : '';
+
+      // SVG limpio y profesional de un camión/bus
+      const busSvg = `
+        <svg class="bus-svg" viewBox="0 0 24 24">
+          <path d="M4 16c0 .88.39 1.67 1 2.22V20c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h8v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 2c-.83 0-1.5-.67-1.5-1.5S6.67 15 7.5 15s1.5.67 1.5 1.5S8.33 18 7.5 18zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm-10-7V6h11v5H6.5z"/>
+        </svg>
+      `;
+
+      // LÓGICA DE TAMAÑOS
+      // Zoom lejano = puntitos fluyendo
+      if (zoom <= 13) {
+        let dotSize = zoom <= 11 ? 6 : (zoom === 12 ? 8 : 10);
+        return L.divIcon({
+          className: 'custom-div-icon',
+          html: `<div class="mb-dot ${selectedClass} ${dimClass}" style="background:${color}; width:${dotSize}px; height:${dotSize}px;"></div>`,
+          iconSize: [dotSize, dotSize],
+          iconAnchor: [dotSize/2, dotSize/2]
+        });
+      }
+
+      // Zoom cercano = Íconos de camiones con flecha direccional
+      let circleSize = zoom === 14 ? 20 : 26; 
+      let arrowSize = zoom === 14 ? 28 : 34;
+      let arrowOffset = zoom === 14 ? -3 : -4;
+
+      const html = `
+        <div class="bus-marker-container ${selectedClass} ${dimClass}">
+          <div class="bus-marker-direction" style="width: ${arrowSize}px; height: ${arrowSize}px; transform: rotate(${bearing}deg);">
+            <div class="bus-marker-arrow" style="top: ${arrowOffset}px; border-bottom: ${arrowSize/4}px solid ${color}; border-left-width: ${arrowSize/6}px; border-right-width: ${arrowSize/6}px;"></div>
+          </div>
+          <div class="bus-marker-circle" style="background-color: ${color}; color: ${textColor}; width: ${circleSize}px; height: ${circleSize}px;">
+            ${busSvg}
+          </div>
+        </div>
+      `;
+
+      return L.divIcon({
+        className: 'custom-div-icon',
+        html: html,
+        iconSize: [arrowSize, arrowSize],
+        iconAnchor: [arrowSize/2, arrowSize/2]
+      });
+    }
+
+    // --- DISEÑO DE ESTACIONES (SVG y Texto dinámico) ---
+    function stopIcon(stopName) {
+      const zoom = map.getZoom();
+      
+      const dotSize = zoom <= 11 ? 7 : (zoom <= 13 ? 9 : 11);
+      const labelZoom = isMobileViewport() ? 15 : 14;
+      // Las estaciones importan, pero en móvil los nombres entran hasta zoom útil.
+      let labelHtml = '';
+      if (zoom >= labelZoom) {
+        labelHtml = `<div class="station-label">${stopName}</div>`;
+      }
+
+      return L.divIcon({
+        className: 'custom-div-icon',
+        html: `
+          <div class="station-marker-container">
+            <div class="station-dot" style="--station-size:${dotSize}px"></div>
+            ${labelHtml}
+          </div>
+        `,
+        iconSize: zoom >= labelZoom ? null : [dotSize, dotSize],
+        iconAnchor: zoom >= labelZoom ? [dotSize/2, dotSize] : [dotSize/2, dotSize/2]
+      });
+    }
+
+    // --- INTERFAZ ---
+    function updateVehicleIcons() {
+      Object.keys(markers).forEach(id => {
+        if (vehicleData[id]) markers[id].setIcon(busIcon(vehicleData[id], id));
+      });
+    }
+
+    function selectVehicle(id, shouldFollow = true) {
+      selectedVehicleId = id;
+      followSelected = shouldFollow;
+      Object.keys(markers).forEach(markerId => markers[markerId].setZIndexOffset(markerId === id ? 1000 : 0));
+      updateVehicleIcons();
+      showSheet(vehicleData[id]);
+      if (followSelected && markers[id]) panToTrackedMarker(markers[id]);
+    }
+
+    function showSheet(v) {
+      if (!v) return;
+      const estimate = stopProgressEstimate(v);
+      const destination = v.headsign || v.route_name || 'Destino no disponible';
+      const speed = formatSpeed(v.speed);
+      const currentStop = estimate?.nearest;
+      const nextStop = estimate?.next;
+      const etaHtml = estimate ? `
+        <div class="sheet-route">
+        <div class="eta-card">
+          <div class="eta-title">Está cerca de</div>
+          <div class="eta-value">${currentStop ? currentStop.stop_name : 'N/D'}</div>
+          <div class="eta-note">${currentStop ? `A ${Math.round(currentStop.distance)} m` : 'Sin estación cercana clara'}</div>
+        </div>
+        <div class="eta-card">
+          <div class="eta-title">Va hacia</div>
+          <div class="eta-value">${nextStop ? nextStop.stop_name : 'N/D'}</div>
+          <div class="eta-note">${nextStop ? `ETA aprox. ${nextStop.etaMin} min · ${Math.round(nextStop.distance)} m` : 'Sin siguiente estación estimada por dirección'}</div>
+        </div>
+        </div>
+      ` : `
+        <div class="eta-card">
+          <div class="eta-title">Llegada estimada</div>
+          <div class="eta-value">Sin estación cercana</div>
+          <div class="eta-note">Necesitamos secuencia de paradas por viaje para un cálculo fino.</div>
+        </div>
+      `;
+
+      document.getElementById('sheetBusIcon').style.background = `#${v.color || '9B1C31'}`;
+      document.getElementById('sheetBusIcon').style.color = `#${v.text_color || 'FFFFFF'}`;
+      document.getElementById('sheetBusIcon').innerHTML = icons.bus;
+      document.getElementById('sheetTitle').innerText = `Unidad ${v.label || v.vehicle_id || v.id || 'N/D'}`;
+      document.getElementById('sheetSub').innerText = `Línea ${v.line} · ${destination}`;
+      document.getElementById('sheetBody').innerHTML = `
+        <div class="sheet-grid">
+          <div class="info-box"><div class="info-label">Línea</div><div class="info-value">Línea ${v.line || 'MB'}</div></div>
+          <div class="info-box"><div class="info-label">Velocidad</div><div class="info-value">${speed}</div></div>
+          <div class="info-box"><div class="info-label">Ruta ID</div><div class="info-value">${v.route_id || 'N/D'}</div></div>
+          <div class="info-box"><div class="info-label">Viaje (Trip)</div><div class="info-value">${v.trip_id || 'N/D'}</div></div>
+        </div>
+        <div class="route-name">Hacia ${destination}</div>
+        ${etaHtml}
+        <div class="eta-note" style="margin-top:10px;">Seguimiento ${followSelected ? 'activo' : 'pausado'} · Actualizado ${lastFeedUpdated || 'N/D'}</div>
+      `;
+      document.getElementById('bottomSheet').style.display = 'block';
+    }
+
+    function closeSheet() {
+      selectedVehicleId = null;
+      followSelected = false;
+      updateVehicleIcons();
+      Object.keys(markers).forEach(id => markers[id].setZIndexOffset(0));
+      document.getElementById('bottomSheet').style.display = 'none';
+    }
+
+    function createLineFilters(lines) {
+      const container = document.getElementById('lineFilters');
+      container.innerHTML = '';
+      linesMap = {};
+
+      lines.forEach(line => {
+        const lineName = line.line;
+        activeLines.add(lineName);
+        linesMap[lineName] = line;
+
+        const btn = document.createElement('button');
+        btn.className = 'line-btn';
+        btn.dataset.line = lineName;
+        btn.innerText = `Línea ${lineName}`;
+        btn.style.background = '#' + line.color;
+        btn.style.color = '#' + (line.text_color || 'FFFFFF');
+
+        btn.onclick = () => {
+          if (activeLines.has(lineName)) {
+            activeLines.delete(lineName);
+            btn.classList.add('off');
+          } else {
+            activeLines.add(lineName);
+            btn.classList.remove('off');
+          }
+          applyLineVisibility();
+        };
+        container.appendChild(btn);
+      });
+      document.getElementById('statLines').innerText = lines.length;
+    }
+
+    // --- VISIBILIDAD Y MAPA ---
+    function getShapeWeight() {
+      const z = map.getZoom();
+      if (z <= 11) return 3;
+      if (z <= 13) return 4;
+      return 6;
+    }
+
+    function getShapeOpacity() {
+      const z = map.getZoom();
+      if (z <= 11) return 0.38;
+      if (z <= 13) return 0.52;
+      return 0.72;
+    }
+
+    function applyLineVisibility() {
+      // Filtrar capas normales (adiós clusters)
+      Object.keys(markers).forEach(id => {
+        const v = vehicleData[id];
+        if (!v) return;
+        if (activeLines.has(String(v.line))) {
+          if (!vehiclesLayer.hasLayer(markers[id])) vehiclesLayer.addLayer(markers[id]);
+        } else {
+          if (vehiclesLayer.hasLayer(markers[id])) vehiclesLayer.removeLayer(markers[id]);
+        }
+      });
+
+      shapesLayer.eachLayer(layer => {
+        const line = String(layer.options.line || '');
+        const visible = activeLines.has(line);
+        layer.setStyle({
+          color: visible ? '#' + (linesMap[line]?.color || '9B1C31') : '#e5e7eb',
+          opacity: visible ? getShapeOpacity() : 0.04,
+          weight: visible ? getShapeWeight() : 1
+        });
+      });
+    }
+
+    function handleZoomVisibility() {
+      const z = map.getZoom();
+      document.getElementById('zoomChip').innerText = `Zoom ${z}`;
+
+      // 1. Re-render de vehículos (cambian de punto a camión según el zoom)
+      Object.keys(markers).forEach(id => {
+        if (vehicleData[id]) markers[id].setIcon(busIcon(vehicleData[id], id));
+      });
+
+      // 2. Re-render de estaciones (muestran texto si z >= 16)
+      stopsLayer.eachLayer(layer => {
+        if (layer.options.stopName) {
+          layer.setIcon(stopIcon(layer.options.stopName));
+        }
+      });
+
+      // 3. Manejo de mostrar/ocultar capas enteras
+      if (z <= 10 && map.hasLayer(stopsLayer)) map.removeLayer(stopsLayer);
+      else if (z > 10 && stopsVisible && !map.hasLayer(stopsLayer)) map.addLayer(stopsLayer);
+
+      // 4. Grosor de trazos
+      shapesLayer.eachLayer(layer => {
+        if (activeLines.has(String(layer.options.line))) layer.setStyle({ weight: getShapeWeight(), opacity: getShapeOpacity() });
+      });
+    }
+
+    map.on('zoomend', handleZoomVisibility);
+
+    function toggleStops() {
+      if (stopsVisible) map.removeLayer(stopsLayer);
+      else { map.addLayer(stopsLayer); handleZoomVisibility(); }
+      stopsVisible = !stopsVisible;
+      document.getElementById('stopsBtn').classList.toggle('active', stopsVisible);
+    }
+
+    function toggleVehicles() {
+      if (vehiclesVisible) map.removeLayer(vehiclesLayer);
+      else map.addLayer(vehiclesLayer);
+      vehiclesVisible = !vehiclesVisible;
+      document.getElementById('vehiclesBtn').classList.toggle('active', vehiclesVisible);
+    }
+
+    function fitToVehicles() {
+      const points = [];
+      Object.keys(markers).forEach(id => {
+        if (vehicleData[id] && activeLines.has(String(vehicleData[id].line))) points.push(markers[id].getLatLng());
+      });
+      if (points.length > 0) map.fitBounds(points, { padding: [50, 50] });
+    }
+
+    // --- ANIMACIÓN ---
+    function animateMarker(marker, fromLatLng, toLatLng, durationMs) {
+      const startTime = performance.now();
+      function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+      
+      function frame(now) {
+        const elapsed = now - startTime;
+        const progress = easeInOut(Math.min(elapsed / durationMs, 1));
+        const lat = fromLatLng.lat + (toLatLng.lat - fromLatLng.lat) * progress;
+        const lng = fromLatLng.lng + (toLatLng.lng - fromLatLng.lng) * progress;
+        marker.setLatLng([lat, lng]);
+        if (elapsed < durationMs) requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    }
+
+    // --- CARGA DE DATOS ---
+    async function loadRoutes() {
+      try {
+        const res = await fetch('routes.json');
+        const data = await res.json();
+        if (data.lines) createLineFilters(data.lines);
+      } catch (e) { console.error('Error rutas:', e); }
+    }
+
+    async function loadShapes() {
+      try {
+        const res = await fetch('shapes.json');
+        const data = await res.json();
+        shapesLayer.clearLayers();
+        data.shapes.forEach(shape => {
+          L.polyline(shape.points, {
+            weight: getShapeWeight(),
+            opacity: activeLines.has(String(shape.line)) ? getShapeOpacity() : 0.04,
+            color: activeLines.has(String(shape.line)) ? '#' + (linesMap[String(shape.line)]?.color || '9B1C31') : '#e5e7eb',
+            line: String(shape.line || '')
+          }).addTo(shapesLayer);
+        });
+        document.getElementById('extraStatus').innerText = "Mapa interactivo listo.";
+      } catch (e) { console.error('Error shapes:', e); }
+    }
+
+    async function loadStops() {
+      try {
+        const res = await fetch('stops.json');
+        const data = await res.json();
+        allStops = data.stops || [];
+        stopsLayer.clearLayers();
+        data.stops.forEach(stop => {
+          if (!stop.lat || !stop.lon) return;
+          // Le guardamos el nombre en las options para poder re-renderizarlo en el zoom
+          L.marker([stop.lat, stop.lon], { 
+            icon: stopIcon(stop.stop_name),
+            stopName: stop.stop_name 
+          }).addTo(stopsLayer);
+        });
+        document.getElementById('statStops').innerText = data.count;
+      } catch (e) { console.error('Error paradas:', e); }
+    }
+
+    async function loadVehicles() {
+      try {
+        const res = await fetch('vehicles.json?nocache=' + Date.now());
+        const data = await res.json();
+        if (data.error) return;
+        lastFeedUpdated = data.updated_local || '';
+
+        document.getElementById('status').innerText = `${data.count} unidades en tiempo real · Actualizado ${data.updated_local}`;
+        document.getElementById('statVehicles').innerText = data.count;
+
+        const activeIds = new Set();
+        data.vehicles.forEach(v => {
+          if (!v.lat || !v.lon) return;
+          v.line = String(v.line || 'MB');
+          if (!activeLines.has(v.line)) activeLines.add(v.line);
+
+          const id = v.vehicle_id || v.id || v.trip_id;
+          activeIds.add(id);
+          const newLatLng = L.latLng(v.lat, v.lon);
+          let bearing = safeBearing(v.bearing);
+
+          if (markers[id]) {
+            const currentLatLng = markers[id].getLatLng();
+            if (!v.bearing && currentLatLng.distanceTo(newLatLng) > 2) bearing = estimateBearing(currentLatLng, newLatLng);
+            v.bearing = bearing;
+            vehicleData[id] = v;
+            
+            // Actualizamos el ícono y hacemos la animación
+            markers[id].setIcon(busIcon(v, id));
+            const distance = currentLatLng.distanceTo(newLatLng);
+            if (distance > 3 && distance < 2500) animateMarker(markers[id], currentLatLng, newLatLng, ANIMATION_MS);
+            else markers[id].setLatLng(newLatLng);
+          } else {
+            v.bearing = bearing;
+            vehicleData[id] = v;
+            
+            // Creamos marcador y lo agregamos directo a vehiclesLayer
+            markers[id] = L.marker(newLatLng, { icon: busIcon(v, id), interactive: true });
+            vehiclesLayer.addLayer(markers[id]);
+            markers[id].on('click', () => selectVehicle(id, true));
+          }
+
+          // Filtros de visibilidad
+          if (activeLines.has(v.line)) {
+            if (!vehiclesLayer.hasLayer(markers[id])) vehiclesLayer.addLayer(markers[id]);
+          } else {
+            if (vehiclesLayer.hasLayer(markers[id])) vehiclesLayer.removeLayer(markers[id]);
+          }
+        });
+
+        Object.keys(markers).forEach(id => {
+          if (!activeIds.has(id)) {
+            vehiclesLayer.removeLayer(markers[id]);
+            delete markers[id];
+            delete vehicleData[id];
+            if (selectedVehicleId === id) closeSheet();
+          }
+        });
+
+        if (selectedVehicleId && vehicleData[selectedVehicleId] && markers[selectedVehicleId]) {
+          showSheet(vehicleData[selectedVehicleId]);
+          if (followSelected) {
+            panToTrackedMarker(markers[selectedVehicleId]);
+          }
+        }
+      } catch (e) { document.getElementById('status').innerText = 'Error actualizando red...'; }
+    }
+
+    async function boot() {
+      initChromeIcons();
+      await loadRoutes();
+      await loadShapes();
+      await loadStops();
+      await loadVehicles();
+      setInterval(loadVehicles, REFRESH_SECONDS * 1000);
+    }
+
+    boot();
+  </script>
+</body>
+</html>
