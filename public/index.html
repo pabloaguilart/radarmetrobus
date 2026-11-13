@@ -493,6 +493,7 @@
       light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
     };
     let tileKey = '';
+    let vehicleFeedUrl = 'vehicles.json';
     function tileUrl(theme) {
       const url = tileUrls[theme];
       return tileKey ? url + '?key=' + encodeURIComponent(tileKey) : url;
@@ -502,7 +503,10 @@
       try {
         const response = await fetch('map-config.json');
         if (!response.ok) return;
-        const { cartoTileKey } = await response.json();
+        const { cartoTileKey, vehicleFeedUrl: configuredFeed } = await response.json();
+        if (typeof configuredFeed === 'string' && configuredFeed) {
+          vehicleFeedUrl = configuredFeed;
+        }
         if (typeof cartoTileKey === 'string' && cartoTileKey) {
           tileKey = cartoTileKey;
           baseLayer.setUrl(tileUrl(currentTheme));
@@ -1012,13 +1016,16 @@
 
     async function loadVehicles() {
       try {
-        const res = await fetch('vehicles.json');
+        const res = await fetch(vehicleFeedUrl);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         if (data.error) return;
         lastFeedUpdated = data.updated_local || '';
 
-        document.getElementById('status').innerText = `${data.count} unidades en tiempo real · Actualizado ${data.updated_local}`;
+        const updatedAt = Date.parse(data.updated_at);
+        const stale = Number.isFinite(updatedAt) && Date.now() - updatedAt > 60_000;
+        const label = stale ? 'unidades en la última lectura' : 'unidades en el mapa';
+        document.getElementById('status').innerText = `${data.count} ${label} · Actualizado ${data.updated_local}`;
         document.getElementById('statVehicles').innerText = data.count;
 
         const activeIds = new Set();
@@ -1076,7 +1083,11 @@
             panToTrackedMarker(markers[selectedVehicleId]);
           }
         }
-      } catch (e) { document.getElementById('status').innerText = 'Error actualizando red...'; }
+      } catch (e) {
+        document.getElementById('status').innerText = lastFeedUpdated
+          ? `Posiciones sin actualizar · Última lectura ${lastFeedUpdated}`
+          : 'Posiciones en vivo no disponibles';
+      }
     }
 
     let vehicleTimer;
@@ -1098,10 +1109,11 @@
 
     async function boot() {
       initChromeIcons();
-      void loadMapConfig();
+      const mapConfig = loadMapConfig();
       await loadRoutes();
       await loadShapes();
       await loadStops();
+      await mapConfig;
       document.addEventListener('visibilitychange', refreshVehicles);
       await refreshVehicles();
     }

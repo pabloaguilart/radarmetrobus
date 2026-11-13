@@ -1,0 +1,6 @@
+{
+    "name": "radarmetrobus",
+    "compatibility_date": "2026-11-13",
+    "assets": { "directory": "./dist" },
+    "build": { "command": "npm run build:cloudflare" }
+}
