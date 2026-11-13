@@ -14,7 +14,6 @@ const PUBLIC_DIR = path.join(BASE_DIR, "public");
 const API_URL = "https://metrobus-gtfs.sinopticoplus.com/gtfs-api/partnerValidation";
 const API_USER = process.env.API_USER;
 const API_PASS = process.env.API_PASS;
-
 // Rutas de archivos GTFS locales
 const SHAPES_FILE = path.join(PUBLIC_DIR, "shapes.txt");
 const STOPS_FILE = path.join(PUBLIC_DIR, "stops.txt");
@@ -229,10 +228,10 @@ async function fetchVehiclesWorker() {
 }
 
 // --- EXPRESS ENDPOINTS ---
-app.use(express.static(PUBLIC_DIR));
+app.use(express.static(PUBLIC_DIR, { index: false }));
 
 app.get('/', (req, res) => {
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+    res.type('html').send(fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8').replaceAll('__CARTO_TILE_KEY__', encodeURIComponent(process.env.CARTO_TILE_KEY || '')));
 });
 
 // Ahora sí están todos los endpoints para que el HTML los consuma
