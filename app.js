@@ -231,6 +231,10 @@ async function fetchVehiclesWorker() {
 // --- EXPRESS ENDPOINTS ---
 app.use(express.static(PUBLIC_DIR));
 
+app.get('/map-config.json', (_req, res) => {
+    res.json({ cartoTileKey: process.env.CARTO_TILE_KEY || null });
+});
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });

@@ -492,6 +492,25 @@
       dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
       light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
     };
+    let tileKey = '';
+    function tileUrl(theme) {
+      const url = tileUrls[theme];
+      return tileKey ? url + '?key=' + encodeURIComponent(tileKey) : url;
+    }
+
+    async function loadMapConfig() {
+      try {
+        const response = await fetch('map-config.json');
+        if (!response.ok) return;
+        const { cartoTileKey } = await response.json();
+        if (typeof cartoTileKey === 'string' && cartoTileKey) {
+          tileKey = cartoTileKey;
+          baseLayer.setUrl(tileUrl(currentTheme));
+        }
+      } catch {
+        // The basemap also has an anonymous configuration.
+      }
+    }
     let baseLayer = L.tileLayer(tileUrls.dark, {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap &copy; CARTO'
@@ -563,7 +582,7 @@
       currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
       document.body.classList.toggle('light', currentTheme === 'light');
       map.removeLayer(baseLayer);
-      baseLayer = L.tileLayer(tileUrls[currentTheme], {
+      baseLayer = L.tileLayer(tileUrl(currentTheme), {
         maxZoom: 19,
         attribution: '&copy; OpenStreetMap &copy; CARTO'
       }).addTo(map);
@@ -993,7 +1012,8 @@
 
     async function loadVehicles() {
       try {
-        const res = await fetch('vehicles.json?nocache=' + Date.now());
+        const res = await fetch('vehicles.json');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         if (data.error) return;
         lastFeedUpdated = data.updated_local || '';
@@ -1059,13 +1079,31 @@
       } catch (e) { document.getElementById('status').innerText = 'Error actualizando red...'; }
     }
 
+    let vehicleTimer;
+    let updatingVehicles = false;
+    async function refreshVehicles() {
+      clearTimeout(vehicleTimer);
+      if (document.hidden || updatingVehicles) return;
+
+      updatingVehicles = true;
+      try {
+        await loadVehicles();
+      } finally {
+        updatingVehicles = false;
+        if (!document.hidden) {
+          vehicleTimer = setTimeout(refreshVehicles, REFRESH_SECONDS * 1000);
+        }
+      }
+    }
+
     async function boot() {
       initChromeIcons();
+      void loadMapConfig();
       await loadRoutes();
       await loadShapes();
       await loadStops();
-      await loadVehicles();
-      setInterval(loadVehicles, REFRESH_SECONDS * 1000);
+      document.addEventListener('visibilitychange', refreshVehicles);
+      await refreshVehicles();
     }
 
     boot();
