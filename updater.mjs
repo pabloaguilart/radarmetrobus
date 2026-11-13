@@ -26,9 +26,9 @@ export class RadarUpdater extends DurableObject {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usuario: this.env.API_USER, senha: this.env.API_PASS }),
             signal: AbortSignal.timeout(12_000),
-            redirect: 'error',
+            redirect: 'manual',
         });
-        if (!response.ok) throw new Error('La validación del proveedor falló.');
+        if (!response.ok) throw new Error(`GTFS HTTP ${response.status}`);
         const { urlRealTime } = await response.json();
         const url = new URL(urlRealTime);
         if (url.protocol !== 'https:' || url.username || url.password) {
@@ -59,7 +59,13 @@ export class RadarUpdater extends DurableObject {
             await this.ctx.storage.put('snapshot', JSON.stringify(snapshot));
         } catch (error) {
             retryMs = 30_000;
-            const code = error instanceof Error ? error.message.match(/\b(?:1101|1102|1020|52[0-9])\b/)?.[0] : undefined;
+            const code = error instanceof Error && error.name === 'TypeError'
+                ? error.message
+                    .replaceAll(this.env.API_USER, '[usuario]')
+                    .replaceAll(this.env.API_PASS, '[secreto]')
+                    .replace(/https?:[^\s]+/gi, '[URL]')
+                    .slice(0, 160)
+                : undefined;
             console.warn('No se pudo actualizar el Radar.', stage, error instanceof Error ? error.name : 'UnknownError', code ?? '');
         } finally {
             await this.ctx.storage.setAlarm(Math.max(Date.now() + 1_000, startedAt + retryMs));
