@@ -25,7 +25,7 @@ export class RadarUpdater extends DurableObject {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usuario: this.env.API_USER, senha: this.env.API_PASS }),
-            signal: AbortSignal.timeout(5_000),
+            signal: AbortSignal.timeout(12_000),
             redirect: 'error',
         });
         if (!response.ok) throw new Error('La validación del proveedor falló.');
@@ -42,20 +42,25 @@ export class RadarUpdater extends DurableObject {
         if (!this.env.API_USER || !this.env.API_PASS) return;
         const startedAt = Date.now();
         let retryMs = refreshMs;
+        let stage = 'validación';
         try {
             const url = await this.getFeedUrl();
-            const response = await fetch(url, { signal: AbortSignal.timeout(7_000) });
+            stage = 'descarga';
+            const response = await fetch(url, { signal: AbortSignal.timeout(12_000) });
             if (response.status === 401 || response.status === 403) {
                 await this.ctx.storage.delete('feedUrl');
             }
             if (!response.ok) throw new Error('El proveedor de posiciones no respondió correctamente.');
 
+            stage = 'decodificación';
             const snapshot = realtime.decodeVehicles(await response.arrayBuffer(), lookup);
             if (snapshot.count === 0) throw new Error('El proveedor devolvió un feed vacío.');
+            stage = 'almacenamiento';
             await this.ctx.storage.put('snapshot', JSON.stringify(snapshot));
         } catch (error) {
             retryMs = 30_000;
-            console.warn('No se pudo actualizar el Radar.', error instanceof Error ? error.name : 'UnknownError');
+            const code = error instanceof Error ? error.message.match(/\b(?:1101|1102|1020|52[0-9])\b/)?.[0] : undefined;
+            console.warn('No se pudo actualizar el Radar.', stage, error instanceof Error ? error.name : 'UnknownError', code ?? '');
         } finally {
             await this.ctx.storage.setAlarm(Math.max(Date.now() + 1_000, startedAt + retryMs));
         }
