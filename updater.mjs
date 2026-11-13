@@ -53,9 +53,9 @@ export class RadarUpdater extends DurableObject {
             const snapshot = realtime.decodeVehicles(await response.arrayBuffer(), lookup);
             if (snapshot.count === 0) throw new Error('El proveedor devolvió un feed vacío.');
             await this.ctx.storage.put('snapshot', JSON.stringify(snapshot));
-        } catch {
+        } catch (error) {
             retryMs = 30_000;
-            console.warn('No se pudo actualizar el Radar. Se conserva la última lectura.');
+            console.warn('No se pudo actualizar el Radar.', error instanceof Error ? error.name : 'UnknownError');
         } finally {
             await this.ctx.storage.setAlarm(Math.max(Date.now() + 1_000, startedAt + retryMs));
         }
@@ -74,8 +74,10 @@ export default {
         const cached = await caches.default.match(key);
         if (cached) return request.method === 'HEAD' ? new Response(null, cached) : cached;
 
-        const snapshot = await env.RADAR.getByName('metrobuses').snapshot();
+        const radar = env.RADAR.getByName('metrobuses');
+        const snapshot = await radar.snapshot();
         if (!snapshot) {
+            ctx.waitUntil(radar.ensureRunning());
             return Response.json({ error: 'Posiciones en vivo no disponibles' }, {
                 status: 503,
                 headers: { 'Cache-Control': 'no-store' },
